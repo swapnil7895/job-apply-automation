@@ -9,5 +9,6 @@
     "ctc_full": "1620000",
     "expected_ctc": "23",
     "expected_ctc_full": "2300000",
-    "location": "Pune"
+    "location": "Pune",
+    "max_log_files": 5
 }
