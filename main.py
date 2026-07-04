@@ -128,13 +128,20 @@ def run_linkedin(playwright, config: dict, logger: logging.Logger) -> None:
 
     page = context.pages[0]
     logger.info("Navigating to LinkedIn...")
-    page.goto("https://www.linkedin.com/")
-    page.wait_for_load_state("domcontentloaded")
+    try:
+        page.goto("https://www.linkedin.com/", wait_until="domcontentloaded", timeout=60000)
+    except Exception as e:
+        logger.warning(f"Timeout during navigation, continuing anyway: {e}")
 
     if not actions.is_already_logged_in(page):
         actions.login(page, username, password)
     actions.search_jobs(page)
-    actions.apply_to_jobs(page, config)
+    job_records = actions.apply_to_jobs(page, config)
+
+    logger.info("Generating PDF report...")
+    from report_generator import generate_pdf_report
+    report_path = generate_pdf_report("linkedin", job_records)
+    logger.info(f"Execution report saved to: {report_path}")
 
     logger.info("LinkedIn automation finished.")
     context.close()
@@ -176,13 +183,20 @@ def run_naukri(playwright, config: dict, logger: logging.Logger) -> None:
         page = context.new_page()
 
     logger.info("Navigating to Naukri...")
-    page.goto("https://www.naukri.com/")
-    page.wait_for_load_state("domcontentloaded")
+    try:
+        page.goto("https://www.naukri.com/", wait_until="domcontentloaded", timeout=60000)
+    except Exception as e:
+        logger.warning(f"Timeout during navigation, continuing anyway: {e}")
 
     if not actions.is_already_logged_in(page):
         actions.login(page, username, password)
     actions.search_jobs(page, config)
-    actions.apply_to_jobs(page, config)
+    job_records = actions.apply_to_jobs(page, config)
+
+    logger.info("Generating PDF report...")
+    from report_generator import generate_pdf_report
+    report_path = generate_pdf_report("naukri", job_records)
+    logger.info(f"Execution report saved to: {report_path}")
 
     logger.info("Naukri automation finished.")
     context.close()

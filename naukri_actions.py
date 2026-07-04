@@ -768,8 +768,9 @@ def _handle_quick_apply_panel(job_page, config: dict) -> bool:
 # Main Application Loop
 # ---------------------------------------------------------------------------
 
-def apply_to_jobs(page, config: dict) -> None:
+def apply_to_jobs(page, config: dict) -> list:
     """Iterates job cards on Naukri search results and applies to each one.
+    Returns a list of job processing records.
     
     Naukri's actual apply flow:
     1. Search results page shows job cards — there is NO Apply button on the card.
@@ -780,6 +781,7 @@ def apply_to_jobs(page, config: dict) -> None:
     6. If no panel       → external/redirect apply, skip → close tab → back to search tab.
     """
     logger.info("Starting Naukri Job Application Loop...")
+    job_records = []
 
     context = page.context
     search_tab = page  # Keep a firm reference to the search results tab
@@ -806,7 +808,7 @@ def apply_to_jobs(page, config: dict) -> None:
 
     if not job_card_selector:
         logger.error("No Naukri job cards found on the page. Aborting.")
-        return
+        return job_records
 
     # Scroll to lazy-load all cards then back to top.
     # Use mouse.wheel (browser-level input) not page.evaluate/JS —
@@ -838,11 +840,15 @@ def apply_to_jobs(page, config: dict) -> None:
             title_el = card.locator(
                 "a.title, a.jobTitle, h2 a, .title a, a[title]"
             ).first
-            job_title = (
-                title_el.inner_text().strip()
-                if title_el.count() > 0 and title_el.is_visible()
-                else f"Job #{index + 1}"
-            )
+            
+            comp_el = card.locator(
+                "a.comp-name, a.company, .companyName, .m-name a"
+            ).first
+            
+            raw_title = title_el.inner_text().strip() if title_el.count() > 0 and title_el.is_visible() else f"Job #{index + 1}"
+            raw_comp = comp_el.inner_text().strip() if comp_el.count() > 0 and comp_el.is_visible() else "Unknown Company"
+            
+            job_title = f"{raw_title} at {raw_comp}"
             logger.info(f"[{index + 1}/{total}] Processing: {job_title}")
 
             card.scroll_into_view_if_needed()
@@ -855,6 +861,7 @@ def apply_to_jobs(page, config: dict) -> None:
             )
             if already_applied.count() > 0 and already_applied.first.is_visible():
                 logger.info(" -> Already applied — skipping.")
+                job_records.append({"title": job_title, "status": "Ignored", "reason": "Already applied"})
                 continue
 
             # ------------------------------------------------------------------
@@ -862,6 +869,7 @@ def apply_to_jobs(page, config: dict) -> None:
             # ------------------------------------------------------------------
             if title_el.count() == 0 or not title_el.is_visible():
                 logger.info(" -> Could not find clickable title — skipping.")
+                job_records.append({"title": job_title, "status": "Failed", "reason": "Could not find clickable title"})
                 continue
 
             logger.info(" -> Clicking job title (new tab expected)...")
@@ -871,6 +879,7 @@ def apply_to_jobs(page, config: dict) -> None:
                 job_page = new_page_info.value
             except Exception:
                 logger.info(" -> No new tab detected — skipping.")
+                job_records.append({"title": job_title, "status": "Failed", "reason": "No new tab detected"})
                 _close_extra_tabs(context, search_tab)
                 search_tab.bring_to_front()
                 continue
@@ -923,6 +932,7 @@ def apply_to_jobs(page, config: dict) -> None:
                     pass
 
             if is_company_site_job:
+                job_records.append({"title": job_title, "status": "Ignored", "reason": "Apply on Company Site"})
                 job_page.close()
                 search_tab.bring_to_front()
                 time.sleep(1)
@@ -973,6 +983,7 @@ def apply_to_jobs(page, config: dict) -> None:
                 except Exception:
                     pass
                 logger.info(" -> No Apply button found — closing tab.")
+                job_records.append({"title": job_title, "status": "Failed", "reason": "No Apply button found"})
                 job_page.close()
                 search_tab.bring_to_front()
                 time.sleep(1)
@@ -990,11 +1001,14 @@ def apply_to_jobs(page, config: dict) -> None:
 
             if applied:
                 logger.info(" -> Done! Closing job tab.")
+                job_records.append({"title": job_title, "status": "Applied", "reason": "Success"})
             else:
                 logger.info(" -> External apply — closing tab.")
+                job_records.append({"title": job_title, "status": "Ignored", "reason": "External apply / Form failed"})
 
         except Exception as e:
             logger.error(f"Error on card {index + 1}: {e}")
+            job_records.append({"title": job_title if 'job_title' in locals() else f"Job #{index+1}", "status": "Failed", "reason": str(e)[:35]})
 
         finally:
             # Always close the job detail tab and return to the search tab.
@@ -1026,6 +1040,7 @@ def apply_to_jobs(page, config: dict) -> None:
             break
 
     logger.info("Finished processing all Naukri job listings.")
+    return job_records
 
 
 def _close_extra_tabs(context, keep_page) -> None:

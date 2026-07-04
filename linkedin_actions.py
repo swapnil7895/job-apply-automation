@@ -215,9 +215,11 @@ def fill_dynamic_fields(page, config) -> None:
         except Exception as e:
             logger.debug(f"Radio fill error: {e}")
 
-def apply_to_jobs(page, config) -> None:
-    """Finds all job cards using the custom DOM XPath, iterates through them, and handles Easy Apply."""
+def apply_to_jobs(page, config) -> list:
+    """Finds all job cards using the custom DOM XPath, iterates through them, and handles Easy Apply.
+    Returns a list of job processing records."""
     logger.info("Starting Job Application Loop")
+    job_records = []
     
     custom_job_xpath = "div[componentkey^='job-card-component-ref']"
 
@@ -225,7 +227,7 @@ def apply_to_jobs(page, config) -> None:
         page.locator(custom_job_xpath).first.wait_for(state="visible", timeout=15000)
     except Exception:
         logger.error("No job cards matching your custom XPath were found on the page.")
-        return
+        return job_records
 
     # Scroll the job pane to load all jobs
     logger.info("Scrolling job pane to load all listings...")
@@ -244,16 +246,25 @@ def apply_to_jobs(page, config) -> None:
 
     for index, card in enumerate(job_cards):
         try:
-            title_element = card.locator("span._9a8c9abc").first
-            job_title = title_element.inner_text() if title_element.is_visible() else f"Job #{index + 1}"
-            logger.info(f"[{index + 1}/{total_jobs}] Processing: {job_title}")
-            
             card.scroll_into_view_if_needed()
             card.click()
             time.sleep(3)
+            
+            # Now that the right pane has loaded, extract the title and company
+            # We use href patterns because LinkedIn's CSS classes are randomized hashes
+            title_element = page.locator("a[href*='/jobs/view/']").first
+            company_element = page.locator("a[href*='/company/']").first
+            
+            raw_title = title_element.inner_text().strip() if title_element.count() > 0 and title_element.is_visible() else f"Job #{index + 1}"
+            raw_company = company_element.inner_text().strip() if company_element.count() > 0 and company_element.is_visible() else "Unknown Company"
+            
+            job_title = f"{raw_title} at {raw_company}"
+            logger.info(f"[{index + 1}/{total_jobs}] Processing: {job_title}")
+            
             # Check if it explicitly says we already applied
             if page.locator("text='Application submitted'").is_visible():
                 logger.info(" -> Skipping: Application submitted status detected.")
+                job_records.append({"title": job_title, "status": "Ignored", "reason": "Already applied"})
                 continue
 
             # Find the Easy Apply button
@@ -304,6 +315,7 @@ def apply_to_jobs(page, config) -> None:
                                 dismiss_btn.click()
                                 time.sleep(1)
                         except: pass
+                        job_records.append({"title": job_title, "status": "Applied", "reason": "Success"})
                         break
                     else:
                         # If we can't click next, review, or submit, we might be stuck on a required field or at the end
@@ -319,6 +331,7 @@ def apply_to_jobs(page, config) -> None:
                                     time.sleep(1)
                         except Exception as e:
                             logger.error(f" -> Could not dismiss modal: {e}")
+                        job_records.append({"title": job_title, "status": "Failed", "reason": "Stuck on form step"})
                         break
 
                 not_now_btn = page.get_by_role("button", name="Not now")
@@ -327,9 +340,12 @@ def apply_to_jobs(page, config) -> None:
                     time.sleep(1)
             else:
                 logger.info(" -> Skipping: Already applied or regular external application link.")
+                job_records.append({"title": job_title, "status": "Ignored", "reason": "External apply / No Easy Apply btn"})
 
         except Exception as card_err:
             logger.error(f"Failed to process card index {index + 1}: {card_err}")
+            job_records.append({"title": f"Job #{index + 1}", "status": "Failed", "reason": str(card_err)[:35]})
             continue
 
     logger.info("Finished processing all job listings on this page")
+    return job_records

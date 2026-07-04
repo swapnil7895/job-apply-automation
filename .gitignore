@@ -2,10 +2,11 @@
 __pycache__/
 venv/
 .venv/
+reports/
 
 # Credential files — never commit real passwords
 config.json
 naukri_config.json
 
 # Log directory
-logs/
+logs/
