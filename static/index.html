@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoApply Pro</title>
+    <link rel="stylesheet" href="/static/style.css?v=1.5">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar" id="sidebar">
+            <div class="logo" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span class="icon">🚀</span>
+                    <h2 class="sidebar-text">AutoApply</h2>
+                </div>
+                <button id="toggle-sidebar-btn" class="collapse-btn" title="Toggle Sidebar">
+                    <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" class="sidebar-arrow"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                </button>
+            </div>
+            <nav>
+                <button class="nav-btn active" data-target="linkedin-panel" title="LinkedIn">
+                    <span class="icon">💼</span> <span class="sidebar-text">LinkedIn</span>
+                </button>
+                <button class="nav-btn" data-target="naukri-panel" title="Naukri">
+                    <span class="icon">🏢</span> <span class="sidebar-text">Naukri</span>
+                </button>
+                <button class="nav-btn" data-target="schedules-panel" title="Schedules">
+                    <span class="icon">📅</span> <span class="sidebar-text">Schedules</span>
+                </button>
+                <button class="nav-btn" data-target="reports-panel" title="Reports">
+                    <span class="icon">📄</span> <span class="sidebar-text">Reports</span>
+                </button>
+                <button class="nav-btn" data-target="settings-panel" title="Settings">
+                    <span class="icon">⚙️</span> <span class="sidebar-text">Settings</span>
+                </button>
+                <div style="flex-grow: 1;"></div>
+                <button id="theme-toggle-btn" class="nav-btn" title="Toggle Theme" style="margin-bottom: 20px;">
+                    <span class="icon" id="theme-icon">☀️</span> <span class="sidebar-text" id="theme-text">Light Mode</span>
+                </button>
+            </nav>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            
+            <!-- LinkedIn Panel -->
+            <section id="linkedin-panel" class="panel active">
+                <header class="panel-header">
+                    <div>
+                        <h1>LinkedIn Automation</h1>
+                        <p>Configure and run your LinkedIn job application bot.</p>
+                    </div>
+                    <div class="actions">
+                        <div id="linkedin-login-status" class="login-status-badge status-checking">
+                            <span class="status-indicator"></span>
+                            <span class="status-text">Checking...</span>
+                            <span class="user-name" style="margin-left: 8px; font-weight: 500; color: var(--primary);"></span>
+                        </div>
+                        <button class="btn btn-secondary" id="btn-login-linkedin">Login Manually</button>
+                        <button id="linkedin-logout-btn" class="btn btn-secondary" style="display: none; border-color: var(--danger); color: var(--danger);">Logout</button>
+                        <label class="toggle-switch" title="Headless mode means browser will not open but it will run in bg">
+                            <input type="checkbox" id="linkedin-headless">
+                            <span class="slider"></span>
+                        </label>
+                        <span class="headless-label" title="Headless mode means browser will not open but it will run in bg" style="cursor: help;">Headless Mode</span>
+                        <button class="btn btn-primary" id="btn-start-linkedin" disabled>Start Automation</button>
+                    </div>
+                </header>
+
+                <div class="config-card">
+                    <h3>Configuration</h3>
+                    <form id="linkedin-form" class="config-form">
+                        <div class="form-group">
+                            <label>Max Applications</label>
+                            <input type="number" name="max_applications" id="linkedin_max_applications">
+                        </div>
+                        <div class="form-group">
+                            <label>Date Posted</label>
+                            <select name="date_posted" id="linkedin_date_posted">
+                                <option value="Past 24 hours">Past 24 hours</option>
+                                <option value="Past week">Past week</option>
+                                <option value="Past month">Past month</option>
+                                <option value="Any time">Any time</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="linkedin_easy_apply"> Easy Apply Only
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="linkedin_remote_only"> Remote Only
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="linkedin_email_alerts"> Enable Email Alerts
+                            </label>
+                        </div>
+                        <div class="form-group full-width">
+                            <label>Job Keywords (comma separated)</label>
+                            <input type="text" name="job_keywords" id="linkedin_job_keywords">
+                        </div>
+                        <div class="form-group full-width">
+                            <label>Location</label>
+                            <input type="text" name="location" id="linkedin_location">
+                        </div>
+                        <div class="form-group full-width">
+                            <label>Title Keywords Filter (comma separated)</label>
+                            <input type="text" name="title_filter_keywords" id="linkedin_title_filter" placeholder="e.g. python, backend. Leave blank to disable">
+                        </div>
+                        <div class="form-group full-width">
+                            <label>Skills Profile (JSON format)</label>
+                            <textarea name="skills_profile" id="linkedin_skills_profile" rows="4" placeholder='{"python": 5, "java": 3, "selenium": 4}'></textarea>
+                            <small style="color:var(--text-secondary)">Used by Intent Engine to answer specific skill experience questions.</small>
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-secondary">Save Configuration</button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+
+            <!-- Naukri Panel -->
+            <section id="naukri-panel" class="panel">
+                <header class="panel-header">
+                    <div>
+                        <h1>Naukri Automation</h1>
+                        <p>Configure and run your Naukri job application bot.</p>
+                    </div>
+                    <div class="actions">
+                        <div id="naukri-login-status" class="login-status-badge status-checking">
+                            <span class="status-indicator"></span>
+                            <span class="status-text">Checking...</span>
+                            <span class="user-name" style="margin-left: 8px; font-weight: 500; color: var(--primary);"></span>
+                        </div>
+                        <button class="btn btn-secondary" id="btn-login-naukri">Login Manually</button>
+                        <button id="naukri-logout-btn" class="btn btn-secondary" style="display: none; border-color: var(--danger); color: var(--danger);">Logout</button>
+                        <label class="toggle-switch" title="Headless mode means browser will not open but it will run in bg">
+                            <input type="checkbox" id="naukri-headless">
+                            <span class="slider"></span>
+                        </label>
+                        <span class="headless-label" title="Headless mode means browser will not open but it will run in bg" style="cursor: help;">Headless Mode</span>
+                        <button class="btn btn-primary" id="btn-start-naukri" disabled>Start Automation</button>
+                    </div>
+                </header>
+
+                <div class="config-card">
+                    <h3>Configuration</h3>
+                    <form id="naukri-form" class="config-form">
+                        <div class="form-group">
+                            <label>Max Applications</label>
+                            <input type="number" name="max_applications" id="naukri_max_applications">
+                        </div>
+                        <div class="form-group">
+                            <label>Date Posted</label>
+                            <select name="date_posted" id="naukri_date_posted">
+                                <option value="1">Past 24 hours</option>
+                                <option value="7">Past week</option>
+                                <option value="30">Past month</option>
+                                <option value="0">Any time</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="naukri_easy_apply"> Direct Apply Only
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="naukri_remote_only"> Remote Only
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="naukri_email_alerts"> Enable Email Alerts
+                            </label>
+                        </div>
+                        <div class="form-group full-width">
+                            <label>Job Keywords (comma separated)</label>
+                            <input type="text" name="job_keywords" id="naukri_job_keywords">
+                        </div>
+                        <div class="form-group full-width">
+                            <label>Location</label>
+                            <input type="text" name="location" id="naukri_location">
+                        </div>
+                        <div class="form-group full-width">
+                            <label>Title Keywords Filter (comma separated)</label>
+                            <input type="text" name="title_filter_keywords" id="naukri_title_filter" placeholder="e.g. python, backend. Leave blank to disable">
+                        </div>
+                        <div class="form-group full-width">
+                            <label>Skills Profile (JSON format)</label>
+                            <textarea name="skills_profile" id="naukri_skills_profile" rows="4" placeholder='{"python": 5, "java": 3, "selenium": 4}'></textarea>
+                            <small style="color:var(--text-secondary)">Used by Intent Engine to answer specific skill experience questions.</small>
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-secondary">Save Configuration</button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+
+            <!-- Schedules Panel -->
+            <section id="schedules-panel" class="panel">
+                <div class="panel-header">
+                    <div>
+                        <h1>Automated Schedules</h1>
+                        <p>Set up daily triggers to run your job search on autopilot</p>
+                    </div>
+                </div>
+
+                <div class="config-card">
+                    <h3>Create New Schedule</h3>
+                    <form id="create-schedule-form" class="config-form" style="display: flex; gap: 16px; align-items: flex-end;">
+                        <div class="form-group" style="flex: 1;">
+                            <label>Platform</label>
+                            <select id="schedule-platform" required>
+                                <option value="linkedin">LinkedIn</option>
+                                <option value="naukri">Naukri</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label>Daily Time</label>
+                            <input type="time" id="schedule-time" required>
+                        </div>
+                        <div class="form-group" style="padding-bottom: 8px;">
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-secondary);">
+                                <input type="checkbox" id="schedule-headless" checked style="width: 16px; height: 16px; margin: 0;">
+                                Headless Mode
+                            </label>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Add Schedule</button>
+                    </form>
+                </div>
+
+                <div class="reports-table-container">
+                    <table class="reports-table" id="schedules-table">
+                        <thead>
+                            <tr>
+                                <th>Platform</th>
+                                <th>Schedule (Daily)</th>
+                                <th>Active</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Populated via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Reports Panel -->
+            <section id="reports-panel" class="panel">
+                <header class="panel-header">
+                    <div>
+                        <h1>Execution Reports</h1>
+                        <p>View and manage automation runs and PDF reports.</p>
+                    </div>
+                    <div class="actions">
+                        <button class="btn btn-secondary" id="btn-delete-reports" disabled style="border-color: var(--danger); color: var(--danger);">Delete Selected</button>
+                        <button class="btn btn-primary" id="btn-refresh-reports">Refresh</button>
+                    </div>
+                </header>
+                
+                <div class="reports-tabs">
+                    <button class="report-tab-btn active" data-platform="linkedin">LinkedIn</button>
+                    <button class="report-tab-btn" data-platform="naukri">Naukri</button>
+                </div>
+                
+                <div class="reports-table-container">
+                    <table class="reports-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 40px;"><input type="checkbox" id="select-all-reports"></th>
+                                <th>ID</th>
+                                <th>Time</th>
+                                <th>Status</th>
+                                <th style="text-align: center;">Success</th>
+                                <th style="text-align: center;">Ignored</th>
+                                <th style="text-align: center;">Failed</th>
+                                <th>PDF Report</th>
+                                <th>Email Alert</th>
+                            </tr>
+                        </thead>
+                        <tbody id="reports-table-body">
+                            <!-- Rows injected via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Global Status Console -->
+            <div class="console-card">
+                <div class="console-header" style="cursor: pointer;" id="console-header-toggle" title="Click to toggle terminal">
+                    <h3>Terminal Output</h3>
+                    <div class="status-indicator">
+                        <span class="dot" id="status-dot"></span>
+                        <span id="status-text">Idle</span>
+                        <button id="toggle-console-btn" class="collapse-btn" style="margin-left:8px;" title="Toggle Console">
+                            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" class="console-arrow"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="console-body" id="console-output">
+                    <!-- Logs will be appended here -->
+                </div>
+            </div>
+
+            <!-- Global Alert Container that can be moved dynamically -->
+            <div id="limit-alert" class="limit-alert" style="display: none;">
+                <span class="icon">🚨</span>
+                <span>Notice: Daily Easy Apply limit reached for <strong id="limit-platform-name" style="text-transform: capitalize;"></strong>. The automation has safely stopped.</span>
+            </div>
+
+            <!-- Settings Panel -->
+            <section id="settings-panel" class="panel">
+                <header class="panel-header">
+                    <div>
+                        <h1>Settings</h1>
+                        <p>Configure global application settings and notifications.</p>
+                    </div>
+                </header>
+                
+                <div class="config-card">
+                    <h3>Email Notifications</h3>
+                    <p style="margin-bottom: 20px; color: var(--text-secondary);">Configure SMTP settings to receive PDF reports after each run.</p>
+                    <div id="email-status-badge" class="login-status-badge status-logged-out" style="margin-bottom:15px; width: fit-content;">❌ Not Configured</div>
+                    <form id="email-settings-form" class="config-form">
+                        <div class="form-group full-width">
+                            <label>SMTP Server</label>
+                            <input type="text" id="email_smtp_server" value="smtp.gmail.com" required>
+                        </div>
+                        <div class="form-group">
+                            <label>SMTP Port</label>
+                            <input type="number" id="email_smtp_port" value="465" required>
+                        </div>
+                        <div class="form-group full-width">
+                            <label>Sender Email</label>
+                            <input type="email" id="email_sender_email" required placeholder="your.email@gmail.com">
+                        </div>
+                        <div class="form-group full-width">
+                            <label>App Password</label>
+                            <input type="password" id="email_sender_password" required placeholder="16-digit app password">
+                            <small style="color:var(--text-secondary)">For Gmail, you must use an <a href="https://myaccount.google.com/apppasswords" target="_blank" style="color:var(--primary)">App Password</a> (2FA required).</small>
+                        </div>
+                        <div class="form-group full-width">
+                            <label>Receiver Email (Optional)</label>
+                            <input type="email" id="email_receiver_email" placeholder="Defaults to Sender Email if blank">
+                        </div>
+                        <div class="form-actions" style="margin-top:20px; justify-content: space-between;">
+                            <button type="button" id="btn-test-email" class="btn btn-secondary">Send Test Email</button>
+                            <button type="submit" class="btn btn-primary">Save Settings</button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+
+        </main>
+    </div>
+    
+    <script src="/static/app.js?v=1.4"></script>
+</body>
+</html>

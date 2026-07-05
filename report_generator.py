@@ -40,10 +40,10 @@ def generate_pdf_report(platform: str, job_records: list) -> str:
     
     # Detailed Table Header
     pdf.set_font("helvetica", "B", 12)
-    # Using cell widths: Title 90, Status 30, Reason 70
-    pdf.cell(90, 10, "Job Title", border=1)
-    pdf.cell(30, 10, "Status", border=1)
-    pdf.cell(70, 10, "Reason / Detail", border=1, ln=True)
+    pdf.cell(75, 10, "Job Title", border=1)
+    pdf.cell(25, 10, "Status", border=1)
+    pdf.cell(65, 10, "Reason / Detail", border=1)
+    pdf.cell(25, 10, "Link", border=1, ln=True)
     
     # Table Rows
     pdf.set_font("helvetica", "", 10)
@@ -53,13 +53,22 @@ def generate_pdf_report(platform: str, job_records: list) -> str:
         status = record.get("status", "Unknown").encode('latin-1', 'replace').decode('latin-1')
         reason = record.get("reason", "").encode('latin-1', 'replace').decode('latin-1')
         
-        # truncate strings if they are too long
-        title = (title[:40] + '...') if len(title) > 40 else title
-        reason = (reason[:35] + '...') if len(reason) > 35 else reason
+        link = record.get("link", "")
         
-        pdf.cell(90, 8, title, border=1)
-        pdf.cell(30, 8, status, border=1)
-        pdf.cell(70, 8, reason, border=1, ln=True)
+        # truncate strings if they are too long
+        title = (title[:35] + '...') if len(title) > 35 else title
+        reason = (reason[:30] + '...') if len(reason) > 30 else reason
+        
+        pdf.cell(75, 8, title, border=1)
+        pdf.cell(25, 8, status, border=1)
+        pdf.cell(65, 8, reason, border=1)
+        
+        if link:
+            pdf.set_text_color(0, 0, 255) # blue link
+            pdf.cell(25, 8, "Apply Here", border=1, ln=True, link=link)
+            pdf.set_text_color(0, 0, 0) # reset
+        else:
+            pdf.cell(25, 8, "-", border=1, ln=True)
         
     pdf.output(pdf_filename)
     return pdf_filename

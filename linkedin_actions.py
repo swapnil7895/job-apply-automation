@@ -1,40 +1,89 @@
-# linkedin_actions.py
 import time
+import intent_engine
 from utils import logger
 
-def is_already_logged_in(page) -> bool:
+def is_already_logged_in(page) -> tuple[bool, str]:
     """Checks the current screen state to see if a valid session is already active.
     
-    Returns True if logged in, False if on a login/landing page.
+    Returns (True, user_name) if logged in, (False, "") if on a login/landing page.
     """
     logger.info("Checking authentication state...")
+    user_name = ""
     try:
         # 1. Check if we are already on the feed URL
         time.sleep(5)
         logger.info(f"URL - {page.url}")
+        
+        is_logged_in = False
         if "linkedin.com/feed" in page.url:
             logger.info("Session active: Detected feed URL path.")
-            return True
+            is_logged_in = True
 
         # 2. Look for a core feed element (like the global navigation bar or search input)
         # We give it a short 3-second timeout so it doesn't hang if we aren't logged in
         global_nav = page.get_by_test_id("typeahead-input")
-        if global_nav.is_visible(timeout=3000):
+        if not is_logged_in and global_nav.is_visible(timeout=3000):
             logger.info("Session active: Found home feed search input element.")
-            return True
+            is_logged_in = True
+            
+        if is_logged_in:
+            try:
+                # Array of possible locators for the user's name
+                name_locators = [
+                    page.locator(".t-16.t-black.t-bold"),
+                    page.locator('a[href^="/in/"]').first,
+                    page.locator('xpath=//*[@id="workspace"]/div/div/aside[1]/div/div/div/div[1]/div/div/div/div/a[1]/div/div[1]/div/p/span'),
+                    page.locator('xpath=/html/body/div/div[2]/div[2]/div[2]/div/main/div/div/aside[1]/div/div/div/div[1]/div/div/div/div/a[1]/div/div[1]/div/p'),
+                    page.locator('div[class*="fee11784"] p span')
+                ]
+
+                for n_loc in name_locators:
+                    if n_loc.count() > 0 and n_loc.first.is_visible(timeout=1000):
+                        text = n_loc.first.inner_text().strip()
+                        # Avoid grabbing promotional banners
+                        if text and "Premium" not in text and "Off" not in text and "\n" not in text:
+                            user_name = text
+                            break
+
+                if not user_name:
+                    # The aside panel often fails to render in headless mode,
+                    # so the absolute easiest and most reliable way is grabbing
+                    # the first image alt text (which is the nav profile photo).
+                    for img_el in page.locator("img[alt]").all():
+                        if img_el.is_visible(timeout=1000):
+                            alt_text = img_el.get_attribute("alt")
+                            # The user's name is usually the first image alt text, 
+                            # while others have "View X's profile" or "avatar".
+                            if alt_text and "view " not in alt_text.lower() and "icon" not in alt_text.lower() and "avatar" not in alt_text.lower():
+                                user_name = alt_text.strip()
+                                break
+            except Exception as e:
+                logger.warning(f"Failed to fetch user name: {e}")
+            return True, user_name
 
         # 3. Double check via your main feed URL selector pattern matching if needed
         # If the sign-in button or link is visible, we are definitely NOT logged in
         sign_in_link = page.get_by_role("link", name="Sign in", exact=True)
         if sign_in_link.is_visible(timeout=1000):
             logger.info("Session expired: 'Sign In' button detected on landing grid.")
-            return False
+            return False, ""
 
     except Exception as check_err:
         logger.debug(f"State assessment element check bypassed: {check_err}")
     
     logger.info("No active session detected. Proceeding with authentication flow.")
-    return False
+    return False, ""
+
+def logout(page) -> None:
+    """Logs the user out by clearing cookies."""
+    logger.info("Logging out from LinkedIn...")
+    try:
+        page.context.clear_cookies()
+        page.goto("https://www.linkedin.com/m/logout/")
+        time.sleep(2)
+        logger.info("Logout successful.")
+    except Exception as e:
+        logger.error(f"Error during logout: {e}")
 
 def login(page, username, password) -> None:
     """Handles routing to sign-in panel and entering credentials securely"""
@@ -68,17 +117,20 @@ def login(page, username, password) -> None:
         logger.warning("Auto-login interrupted (Verification check or UI update detected).")
         input("Please manually log in to your feed view, then press Enter here: ")
 
-def search_jobs(page) -> None:
+def search_jobs(page, config: dict) -> None:
     """Handles the keyword insertion and applying filter settings"""
     logger.info("Executing job search and target filters...")
     
+    keywords = config.get("job_keywords", ["python"])
+    keyword_str = keywords[0] if isinstance(keywords, list) and keywords else (keywords if isinstance(keywords, str) else "python")
+
     search_input = page.get_by_test_id("typeahead-input")
     search_input.wait_for(state="visible", timeout=10000)
     time.sleep(20)
-    search_input.fill("python")    
+    search_input.fill(keyword_str)    
     search_input.press("Enter")
     time.sleep(5)
-    logger.info("entered python")
+    logger.info(f"entered {keyword_str}")
     
     page.wait_for_load_state("domcontentloaded")
     time.sleep(3)
@@ -93,28 +145,89 @@ def search_jobs(page) -> None:
         logger.warning(f"Jobs filter error (ignoring): {e}")
     
     # 'Easy Apply' filter
-    try:
-        try: page.get_by_role("radio", name="Filter by Easy Apply").click(timeout=3000)
-        except: page.locator("button:has-text('Easy Apply')").first.click(timeout=5000)
-        time.sleep(2)
-    except Exception as e:
-        logger.warning(f"Easy Apply filter error (ignoring): {e}")
+    if config.get("easy_apply", True):
+        try:
+            try: page.get_by_role("radio", name="Filter by Easy Apply").click(timeout=3000)
+            except: page.locator("button:has-text('Easy Apply')").first.click(timeout=5000)
+            time.sleep(2)
+        except Exception as e:
+            logger.warning(f"Easy Apply filter error (ignoring): {e}")
+            
+    # 'Remote' filter
+    if config.get("remote_only", False):
+        try:
+            # First, try to see if 'Remote' is just a direct tag/pill toggle on the UI
+            direct_clicked = False
+            try:
+                # LinkedIn often puts hidden text like '(1,000 results)' inside the label, so exact match fails.
+                # Restricting to 'label' or 'button[aria-checked]' avoids clicking job cards.
+                tag = page.locator("label:has-text('Remote'), button[aria-checked]:has-text('Remote'), button[aria-pressed]:has-text('Remote')").filter(visible=True).first
+                if tag.is_visible(timeout=2000):
+                    tag.click(timeout=2000)
+                    time.sleep(3)
+                    direct_clicked = True
+            except:
+                pass
+                
+            if not direct_clicked:
+                dropdown_clicked = False
+                for btn_name in ["Workplace type", "Workplace", "On-site/remote", "Remote"]:
+                    try:
+                        try: page.get_by_role("button", name=f"Filter by {btn_name}").click(timeout=2000)
+                        except: page.locator(f"button:has-text('{btn_name}')").first.click(timeout=2000)
+                        dropdown_clicked = True
+                        break
+                    except:
+                        pass
+                
+                if dropdown_clicked:
+                    time.sleep(1)
+                    try:
+                        try: page.locator("label:has-text('Remote')").filter(visible=True).first.click(timeout=2000)
+                        except:
+                            try: page.get_by_role("radio", name="Remote").click(timeout=2000)
+                            except:
+                                try: page.get_by_role("checkbox", name="Remote").click(timeout=2000)
+                                except: page.locator("span:has-text('Remote')").filter(visible=True).first.click(timeout=2000)
+                    except: pass
+                    time.sleep(1)
+                    try: page.locator("button:has-text('Show results'), span:has-text('Show results')").filter(visible=True).first.click(timeout=4000)
+                    except: pass
+                    time.sleep(4)
+
+        except Exception as e:
+            logger.warning(f"Remote filter error (ignoring): {e}")
     
     # 'Date posted' filter
-    try:
-        try: page.get_by_role("button", name="Filter by Date posted").click(timeout=3000)
-        except: page.locator("button:has-text('Date posted')").first.click(timeout=5000)
-        time.sleep(1)
-        
-        try: page.get_by_role("radio", name="Past week").click(timeout=3000)
-        except: page.locator("label:has-text('Past week'), span:has-text('Past week')").first.click(timeout=5000)
-        time.sleep(1)
-        
-        try: page.get_by_role("button", name="Show results").click(timeout=3000)
-        except: page.locator("button:has-text('Show results'), span:has-text('Show results')").first.click(timeout=5000)
-        time.sleep(4)
-    except Exception as e:
-        logger.warning(f"Date posted filter error (ignoring): {e}")
+    date_posted_val = config.get("date_posted", "Past week")
+    if date_posted_val != "Any time":
+        try:
+            direct_clicked = False
+            try:
+                tag = page.locator(f"label:has-text('{date_posted_val}'), button[aria-checked]:has-text('{date_posted_val}'), button[aria-pressed]:has-text('{date_posted_val}')").filter(visible=True).first
+                if tag.is_visible(timeout=2000):
+                    tag.click(timeout=2000)
+                    time.sleep(3)
+                    direct_clicked = True
+            except:
+                pass
+            
+            if not direct_clicked:
+                try: page.get_by_role("button", name="Filter by Date posted").click(timeout=3000)
+                except: page.locator("button:has-text('Date posted')").first.click(timeout=5000)
+                time.sleep(1)
+                
+                try: page.locator(f"label:has-text('{date_posted_val}')").filter(visible=True).first.click(timeout=3000)
+                except:
+                    try: page.get_by_role("radio", name=date_posted_val).click(timeout=3000)
+                    except: page.locator(f"span:has-text('{date_posted_val}')").filter(visible=True).first.click(timeout=5000)
+                time.sleep(1)
+                
+                try: page.locator("button:has-text('Show results'), span:has-text('Show results')").filter(visible=True).first.click(timeout=4000)
+                except: pass
+                time.sleep(4)
+        except Exception as e:
+            logger.warning(f"Date posted filter error (ignoring): {e}")
 
 def fill_dynamic_fields(page, config) -> None:
     """Dynamically detects and fills input fields in the modal."""
@@ -165,33 +278,23 @@ def fill_dynamic_fields(page, config) -> None:
                         
                         combined = (name_attr + id_attr + aria_label + label_text).lower()
                         
-                        if "ctc" in combined or "salary" in combined:
-                            is_expected = "expect" in combined
-                            short_val = config.get("expected_ctc", "23") if is_expected else config.get("ctc", "16.2")
-                            full_val = config.get("expected_ctc_full", "2300000") if is_expected else config.get("ctc_full", "1620000")
-                            
-                            if has_error:
-                                # If we had an error on the short value, try the full value
-                                el.fill(full_val, timeout=2000)
-                            else:
-                                # Try short value first unless it says lakh
-                                if "lakh" in combined:
-                                    el.fill(short_val, timeout=2000)
-                                else:
-                                    el.fill(short_val, timeout=2000)
-                        elif "year" in combined or "exp" in combined or "experience" in combined:
+                        response = intent_engine.resolve_intent(combined, field_type="text", profile=config)
+                        answer = response.get("answer")
+                        
+                        if answer:
+                            el.fill(answer, timeout=2000)
+                        elif "linkedin" in combined or "website" in combined or "profile" in combined:
+                            el.fill(config.get("linkedin_url", "https://www.linkedin.com/in/swapnil-dhamal-33b5b2220/"), timeout=2000)
+                        else:
                             el.fill(config.get("total_exp", "5"), timeout=2000)
-                        elif "location" in combined or "city" in combined:
-                            el.fill(config.get("location", "Pune"), timeout=2000)
+                            
+                        # Special handling for autocomplete location drop downs if location intent was resolved
+                        if answer == config.get("location", "Pune") and any(kw in combined for kw in ["location", "city"]):
                             time.sleep(1.5)
                             el.press("ArrowDown")
                             time.sleep(0.5)
                             el.press("Enter")
                             time.sleep(0.5)
-                        elif "linkedin" in combined or "website" in combined or "profile" in combined:
-                            el.fill(config.get("linkedin_url", "https://www.linkedin.com/in/swapnil-dhamal-33b5b2220/"), timeout=2000)
-                        else:
-                            el.fill(config.get("total_exp", "5"), timeout=2000)
         except Exception as e:
             logger.debug(f"Input fill error: {e}")
 
@@ -202,15 +305,42 @@ def fill_dynamic_fields(page, config) -> None:
             if fs.is_visible():
                 checked = fs.locator("input[type='radio']:checked").count()
                 if checked == 0:
-                    yes_radio = fs.locator("label").filter(has_text="Yes")
-                    if yes_radio.count() > 0 and yes_radio.first.is_visible():
-                        yes_radio.first.scroll_into_view_if_needed(timeout=1000)
-                        yes_radio.first.click(timeout=2000)
-                    else:
-                        first_radio = fs.locator("label").first
-                        if first_radio.is_visible():
-                            first_radio.scroll_into_view_if_needed(timeout=1000)
-                            first_radio.click(timeout=2000)
+                    fs_legend = fs.locator("legend").first
+                    q_context = fs_legend.inner_text().strip().lower() if fs_legend.is_visible() else ""
+                    
+                    labels = fs.locator("label").all()
+                    valid_labels = []
+                    option_texts = []
+                    for lbl in labels:
+                        if lbl.is_visible():
+                            txt = lbl.inner_text().strip()
+                            if txt:
+                                option_texts.append(txt)
+                                valid_labels.append(lbl)
+                                
+                    if option_texts:
+                        response = intent_engine.resolve_intent(
+                            question_text=q_context, 
+                            field_type="options", 
+                            options=option_texts, 
+                            profile=config
+                        )
+                        best_match_text = response.get("answer")
+                        
+                        clicked = False
+                        if best_match_text:
+                            for lbl in valid_labels:
+                                if lbl.inner_text().strip() == best_match_text:
+                                    lbl.scroll_into_view_if_needed(timeout=1000)
+                                    lbl.click(timeout=2000)
+                                    clicked = True
+                                    break
+                                    
+                        if not clicked and valid_labels:
+                            # Fallback: Just click the first radio
+                            valid_labels[0].scroll_into_view_if_needed(timeout=1000)
+                            valid_labels[0].click(timeout=2000)
+                            
                     time.sleep(0.5)
         except Exception as e:
             logger.debug(f"Radio fill error: {e}")
@@ -243,8 +373,14 @@ def apply_to_jobs(page, config) -> list:
     total_jobs = len(job_cards)
     logger.info(f"Successfully identified {total_jobs} job records via custom XPath.")
 
+    max_applications = config.get("max_applications", 10)
+    applied_count = 0
 
     for index, card in enumerate(job_cards):
+        if applied_count >= max_applications:
+            logger.info(f"Reached max applications limit ({max_applications}). Stopping.")
+            break
+            
         try:
             card.scroll_into_view_if_needed()
             card.click()
@@ -260,6 +396,22 @@ def apply_to_jobs(page, config) -> list:
             
             job_title = f"{raw_title} at {raw_company}"
             logger.info(f"[{index + 1}/{total_jobs}] Processing: {job_title}")
+            
+            # ------------------------------------------------------------------
+            # Apply Title Keywords Filter (if configured)
+            # ------------------------------------------------------------------
+            title_filter_keywords = config.get("title_filter_keywords", [])
+            if title_filter_keywords:
+                matched_title = False
+                for keyword in title_filter_keywords:
+                    if keyword.lower() in raw_title.lower():
+                        matched_title = True
+                        break
+                
+                if not matched_title:
+                    logger.info(f" -> Title mismatch (does not contain: {title_filter_keywords}) — skipping.")
+                    job_records.append({"title": job_title, "status": "Ignored", "reason": "Title mismatch"})
+                    continue
             
             # Check if it explicitly says we already applied
             if page.locator("text='Application submitted'").is_visible():
@@ -278,6 +430,22 @@ def apply_to_jobs(page, config) -> list:
                 logger.info(" -> 'Easy Apply' found! Opening modal...")
                 easy_apply_trigger.click()
                 time.sleep(2)
+
+                # Check for Easy Apply limit
+                try:
+                    limit_text = page.get_by_text("You reached today’s Easy Apply limit")
+                    if limit_text.is_visible():
+                        logger.warning(" -> Easy Apply limit reached! Stopping script.")
+                        got_it_btn = page.get_by_role("button", name="Got it")
+                        if not got_it_btn.is_visible():
+                            got_it_btn = page.locator("button:has-text('Got it')")
+                        if got_it_btn.is_visible():
+                            got_it_btn.first.click(timeout=2000)
+                            time.sleep(1)
+                        job_records.append({"title": job_title, "status": "Failed", "reason": "Daily limit reached"})
+                        return job_records
+                except Exception as e:
+                    logger.debug(f"Limit check error: {e}")
 
                 logger.info(" -> Processing form steps...")
                 max_steps = 10
@@ -306,16 +474,25 @@ def apply_to_jobs(page, config) -> list:
                         time.sleep(2)
                         submit_btn.click() 
                         time.sleep(3) # Wait a moment for submission to process
-                        
-                        # Handle the small success popup cross sign (Dismiss)
+                        # Handle the small success popup cross sign (Dismiss) or Done button
                         try:
-                            dismiss_btn = page.locator("button[aria-label='Dismiss']").first
-                            if dismiss_btn.is_visible():
-                                logger.info(" -> Closing post-submission popup...")
-                                dismiss_btn.click()
+                            # Sometimes the dismiss button takes a moment to appear
+                            dismiss_btn = page.locator("button[aria-label='Dismiss']").last
+                            if dismiss_btn.is_visible(timeout=3000):
+                                logger.info(" -> Closing post-submission popup (Dismiss)...")
+                                dismiss_btn.click(timeout=2000)
                                 time.sleep(1)
-                        except: pass
+                            else:
+                                # Fallback to looking for a 'Done' button if Dismiss is not found
+                                done_btn = page.get_by_role("button", name="Done").last
+                                if done_btn.is_visible(timeout=2000):
+                                    logger.info(" -> Closing post-submission popup (Done)...")
+                                    done_btn.click(timeout=2000)
+                                    time.sleep(1)
+                        except Exception as e:
+                            logger.warning(f" -> Could not close post-submission popup: {e}")
                         job_records.append({"title": job_title, "status": "Applied", "reason": "Success"})
+                        applied_count += 1
                         break
                     else:
                         # If we can't click next, review, or submit, we might be stuck on a required field or at the end
@@ -340,11 +517,24 @@ def apply_to_jobs(page, config) -> list:
                     time.sleep(1)
             else:
                 logger.info(" -> Skipping: Already applied or regular external application link.")
-                job_records.append({"title": job_title, "status": "Ignored", "reason": "External apply / No Easy Apply btn"})
+                job_records.append({"title": job_title, "status": "Ignored", "reason": "External apply / No Easy Apply btn", "link": page.url})
 
         except Exception as card_err:
+            error_msg = str(card_err).lower()
             logger.error(f"Failed to process card index {index + 1}: {card_err}")
             job_records.append({"title": f"Job #{index + 1}", "status": "Failed", "reason": str(card_err)[:35]})
+            
+            # Handle out of memory / page crashes
+            if "target closed" in error_msg or "out of memory" in error_msg or "crash" in error_msg or "disconnected" in error_msg:
+                logger.critical("Critical browser error detected (e.g., Out of Memory). Stopping current page processing.")
+                try:
+                    # Attempt to refresh the page for safety, then break the loop
+                    page.reload(wait_until="domcontentloaded", timeout=15000)
+                    time.sleep(5)
+                except:
+                    pass
+                break
+                
             continue
 
     logger.info("Finished processing all job listings on this page")

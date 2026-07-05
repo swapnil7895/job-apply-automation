@@ -3,10 +3,11 @@ __pycache__/
 venv/
 .venv/
 reports/
-
-# Credential files — never commit real passwords
+ChromeProfile/
+*.db
+*.sqlite3
+.env
 config.json
 naukri_config.json
-
-# Log directory
+scratch_test.py
 logs/

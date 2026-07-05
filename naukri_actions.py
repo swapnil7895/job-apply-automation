@@ -3,6 +3,7 @@
 import time
 import logging
 import urllib.parse
+import intent_engine
 
 logger = logging.getLogger("NaukriAutomation")
 
@@ -11,51 +12,93 @@ logger = logging.getLogger("NaukriAutomation")
 # Auth
 # ---------------------------------------------------------------------------
 
-def is_already_logged_in(page) -> bool:
+def is_already_logged_in(page) -> tuple[bool, str]:
     """Checks if an active Naukri session exists.
     
     Checks URL first (fastest), then falls back to DOM element checks.
-    Returns True if logged in, False otherwise.
+    Returns (True, user_name) if logged in, (False, "") otherwise.
     """
     logger.info("Checking Naukri authentication state...")
+    user_name = ""
     try:
         time.sleep(4)
         current_url = page.url
         logger.info(f"Current URL: {current_url}")
 
-        # URL-based check — fastest and most reliable
+        is_logged_in = False
         if any(x in current_url for x in [
             "mnjuser/homepage",
             "mnjuser/myapply",
             "naukri.com/my-jobs",
         ]):
             logger.info("Session active: logged-in URL detected.")
-            return True
+            is_logged_in = True
 
-        # DOM-based checks — elements exclusive to logged-in state
-        logged_in_selectors = [
-            "span.nI-gNb-usr__name",        # username in top nav
-            "div.nI-gNb-usr__img",          # profile pic
-            "a[href*='mnjuser/homepage']",   # My Naukri anchor
-            "a[title='Logout']",             # Logout link
-        ]
-        for sel in logged_in_selectors:
-            el = page.locator(sel)
-            if el.count() > 0 and el.first.is_visible(timeout=1500):
-                logger.info(f"Session active: '{sel}' visible.")
-                return True
+        if not is_logged_in:
+            logged_in_locators = [
+                page.locator("img[alt='naukri user profile img']"),
+                page.locator(".nI-gNb-drawer__icon-img-wrapper"),
+                page.locator(".nI-gNb-drawer"),
+                page.locator("a[href*='mnjuser/homepage']"),
+                page.locator("a[href*='mnjuser/profile']"),
+                page.locator("a[title='Logout']"),
+                page.locator("text='My Naukri'"),
+                page.locator("text='View profile'"),
+                page.locator("text='Edit profile'"),
+                page.locator(".nI-gNb-usr__img"), # fallback to old class
+            ]
+            
+            for loc in logged_in_locators:
+                if loc.count() > 0:
+                    logger.info(f"Session active: Logged-in element detected.")
+                    is_logged_in = True
+                    break
 
-        # If login button is visible → definitely not logged in
-        login_btn = page.locator("a#login_Layer, a.nI-gNb-log-reg__login")
-        if login_btn.count() > 0 and login_btn.first.is_visible(timeout=1500):
+        if not is_logged_in:
+            if page.locator("body").filter(has_text="My Naukri").count() > 0:
+                logger.info("Session active: 'My Naukri' text found on page.")
+                is_logged_in = True
+
+        if is_logged_in:
+            # Try to fetch user name
+            try:
+                name_locators = [
+                    page.locator(".info__name"),
+                    page.locator(".nI-gNb-info__sub-link"),
+                    page.locator(".name"),
+                    page.locator(".nI-gNb-drawer__name")
+                ]
+                for n_loc in name_locators:
+                    if n_loc.count() > 0 and n_loc.first.is_visible(timeout=1000):
+                        user_name = n_loc.first.inner_text().strip()
+                        if user_name:
+                            break
+            except Exception as e:
+                logger.warning(f"Failed to fetch user name: {e}")
+            return True, user_name
+
+        # Broad check for Login button
+        login_btn = page.locator("a#login_Layer, text='Login', text='Log in'").filter(visible=True).first
+        if login_btn.count() > 0:
             logger.info("Not logged in: Login button detected.")
-            return False
+            return False, ""
 
     except Exception as e:
         logger.debug(f"Auth check exception: {e}")
 
     logger.info("Could not confirm session. Treating as NOT logged in.")
-    return False
+    return False, ""
+
+def logout(page) -> None:
+    """Logs the user out by clearing cookies."""
+    logger.info("Logging out from Naukri...")
+    try:
+        page.context.clear_cookies()
+        page.goto("https://www.naukri.com/")
+        time.sleep(2)
+        logger.info("Logout successful.")
+    except Exception as e:
+        logger.error(f"Error during logout: {e}")
 
 
 def login(page, username: str, password: str) -> None:
@@ -130,11 +173,18 @@ def login(page, username: str, password: str) -> None:
 
 def search_jobs(page, config: dict) -> None:
     """Handles keyword insertion and filter settings on Naukri job search."""
-    keywords     = config.get("keywords", "Python Developer")
+    keywords     = config.get("keywords", ["Python Developer"])
+    if isinstance(keywords, list) and keywords:
+        keywords = keywords[0]
+    elif not isinstance(keywords, str):
+        keywords = "Python Developer"
+    
     location     = config.get("location", "Pune")
     experience   = config.get("experience", "5")
-    company_type = config.get("company_type", "MNC")        # e.g. "MNC", "Indian MNC", "Startup"
-    apply_filter = config.get("apply_on_naukri_filter", True) # True = only show direct-apply jobs
+    company_type = config.get("company_type", "")
+    apply_filter = config.get("easy_apply", True) # True = only show direct-apply jobs
+    date_posted  = config.get("date_posted", "7")
+    remote_only  = config.get("remote_only", False)
 
     logger.info(f"Searching Naukri jobs: '{keywords}' in '{location}'...")
 
@@ -175,6 +225,18 @@ def search_jobs(page, config: dict) -> None:
             f"input[value='{company_type}']",
             f"a:has-text('{company_type}')",
         ], f"Company type '{company_type}'")
+
+    # 3. Date Posted filter
+    if date_posted == "1":
+        _click_filter(page, ["label:has-text('Last 1 Day')", "span:has-text('Last 1 Day')"], "Date posted: Last 1 Day")
+    elif date_posted == "7":
+        _click_filter(page, ["label:has-text('Last 7 Days')", "span:has-text('Last 7 Days')"], "Date posted: Last 7 Days")
+    elif date_posted == "30":
+        _click_filter(page, ["label:has-text('Last 30 Days')", "span:has-text('Last 30 Days')"], "Date posted: Last 30 Days")
+
+    # 4. Remote Filter
+    if remote_only:
+        _click_filter(page, ["label:has-text('Remote')", "span:has-text('Remote')"], "Remote Only")
 
     time.sleep(2)  # Let results refresh after filters
     logger.info(f"Filters applied. Final page: {page.url}")
@@ -256,18 +318,15 @@ def fill_application_form(page, config: dict) -> None:
                 and not any(kw in combined for kw in ["how many", "how much", "number of"])
             )
 
-            if "current ctc" in combined or ("ctc" in combined and "expect" not in combined):
-                answer = config.get("current_ctc", "16.2")
-            elif "expect" in combined and "ctc" in combined:
-                answer = config.get("expected_ctc", "23")
-            elif "notice" in combined:
-                answer = config.get("notice_period", "30")
-            elif is_yes_no:
+            # Let intent engine resolve it
+            response = intent_engine.resolve_intent(combined, field_type="text", profile=config)
+            answer = response.get("answer")
+            
+            # Additional fallback just in case intent engine fails and it's a yes/no
+            if answer is None and is_yes_no:
                 answer = "Yes"
-            elif any(kw in combined for kw in ["exp", "year", "worked on", "github", "action", "how much", "how many", "technology"]):
+            if not answer:
                 answer = config.get("experience", "4")
-            elif "location" in combined or "city" in combined:
-                answer = config.get("location", "Pune")
             elif "mobile" in combined or "phone" in combined:
                 answer = config.get("mobile", "")
 
@@ -344,7 +403,7 @@ def fill_application_form(page, config: dict) -> None:
                     placeholder = el.get_attribute("placeholder") or ""
                     aria_label  = el.get_attribute("aria-label")  or ""
                     
-                    # More robust label text extraction that traverses ancestors and siblings
+                    # Robust label text extraction (avoiding parentElement.parentElement which grabs the whole form)
                     label_text  = el.evaluate(
                         "el => { "
                         "  let text = ''; "
@@ -352,7 +411,6 @@ def fill_application_form(page, config: dict) -> None:
                         "  if (l) text += l.innerText + ' '; "
                         "  let p = el.parentElement; "
                         "  if (p) text += p.innerText + ' '; "
-                        "  if (p && p.parentElement) text += p.parentElement.innerText + ' '; "
                         "  let prev = el.previousElementSibling; "
                         "  while (prev) { text += prev.innerText + ' '; prev = prev.previousElementSibling; } "
                         "  return text; "
@@ -365,27 +423,22 @@ def fill_application_form(page, config: dict) -> None:
                         and not any(kw in combined for kw in ["how many", "how much", "number of"])
                     )
 
-                    if "current ctc" in combined or ("ctc" in combined and "expect" not in combined):
-                        safe_type(el, config.get("current_ctc", "16.2"))
-                    elif "expect" in combined and "ctc" in combined:
-                        safe_type(el, config.get("expected_ctc", "23"))
-                    elif "notice" in combined:
-                        safe_type(el, config.get("notice_period", "30"))
-                    elif is_yes_no:
-                        safe_type(el, "Yes")
-                    elif any(kw in combined for kw in ["exp", "year", "worked on", "github", "action", "how much", "how many", "technology"]):
-                        safe_type(el, config.get("experience", "4"))
-                    elif "location" in combined or "city" in combined:
-                        safe_type(el, config.get("location", "Pune"))
+                    response = intent_engine.resolve_intent(combined, field_type="text", profile=config)
+                    answer = response.get("answer")
+                    
+                    if answer is None and is_yes_no:
+                        answer = "Yes"
+                    if not answer:
+                        answer = config.get("experience", "4")
+                    
+                    safe_type(el, answer)
+                    
+                    # Special handling for autocomplete location drop downs if location intent was resolved
+                    if response.get("field") == "location" and any(kw in combined for kw in ["location", "city"]):
                         time.sleep(1)
                         el.press("ArrowDown")
                         time.sleep(0.5)
                         el.press("Enter")
-                    elif "mobile" in combined or "phone" in combined:
-                        safe_type(el, config.get("mobile", ""))
-                    else:
-                        # Generic fallback: if it asks for a number or experience or tech, fill 4
-                        safe_type(el, "4")
 
         except Exception as e:
             logger.debug(f"   Form fill error: {e}")
@@ -470,110 +523,48 @@ def fill_application_form(page, config: dict) -> None:
                 ).all()
                 clicked = False
 
-                # 1. If question mentions location or city, match the configured location (e.g. Pune)
-                target_loc = config.get("location", "Pune").strip().lower()
-                if target_loc and any(kw in q_context for kw in ["city", "location", "reside", "willing", "relocat", "where", "place"]):
-                    for opt in options:
-                        try:
-                            if not opt.is_visible():
-                                continue
-                            txt = opt.inner_text().strip().lower()
-                            if target_loc in txt:
-                                opt.click(timeout=1500)
-                                time.sleep(0.3)
-                                clicked = True
-                                break
-                        except Exception:
-                            pass
-
-                # 2. If relocation or willingness to relocate question, choose Yes/Willing
-                if not clicked and any(kw in q_context for kw in ["relocat", "willing", "reside", "shift", "move", "location", "willingness"]):
-                    for opt in options:
-                        try:
-                            if not opt.is_visible():
-                                continue
-                            txt = opt.inner_text().strip().lower()
-                            if txt in ["yes", "willing", "willing to relocate", "willing to shift", "agree", "willingness"]:
-                                opt.click(timeout=1500)
-                                time.sleep(0.3)
-                                clicked = True
-                                break
-                        except Exception:
-                            pass
-
-                # 3. If question mentions experience/years/exp, choose option matching config's experience level
-                exp_val_str = config.get("experience", "4").strip()
-                try:
-                    exp_val = int(exp_val_str)
-                except ValueError:
-                    exp_val = 4
-
-                is_experience_q = any(kw in q_context for kw in ["exp", "year", "worked on", "how many", "technology", "duration"])
-                if not clicked and is_experience_q:
-                    import re
-                    for opt in options:
-                        try:
-                            if not opt.is_visible():
-                                continue
-                            txt = opt.inner_text().strip().lower()
-                            numbers = [int(n) for n in re.findall(r'\d+', txt)]
-                            
-                            # Range like "3-5 years" or "3 to 5"
-                            if len(numbers) == 2:
-                                if min(numbers) <= exp_val <= max(numbers):
+                # Extract visible text of all options
+                option_texts = []
+                valid_opts = []
+                for opt in options:
+                    try:
+                        if opt.is_visible():
+                            txt = opt.inner_text().strip()
+                            if txt:
+                                option_texts.append(txt)
+                                valid_opts.append(opt)
+                    except Exception:
+                        pass
+                
+                if option_texts:
+                    # Let the intent engine pick the best option
+                    response = intent_engine.resolve_intent(
+                        question_text=q_context, 
+                        field_type="options", 
+                        options=option_texts, 
+                        profile=config
+                    )
+                    best_match_text = response.get("answer")
+                    
+                    if best_match_text:
+                        for opt in valid_opts:
+                            try:
+                                if opt.inner_text().strip() == best_match_text:
                                     opt.click(timeout=1500)
                                     time.sleep(0.3)
                                     clicked = True
+                                    logger.info(f"   Resolved intent option: {best_match_text}")
                                     break
-                            # Single number with modifiers like "5+" or ">3" or "<5"
-                            elif len(numbers) == 1:
-                                n = numbers[0]
-                                if any(kw in txt for kw in ["+", "more", ">", "above"]):
-                                    if exp_val >= n:
-                                        opt.click(timeout=1500)
-                                        time.sleep(0.3)
-                                        clicked = True
-                                        break
-                                elif any(kw in txt for kw in ["<", "less", "below"]):
-                                    if exp_val <= n:
-                                        opt.click(timeout=1500)
-                                        time.sleep(0.3)
-                                        clicked = True
-                                        break
-                                else:
-                                    if exp_val == n:
-                                        opt.click(timeout=1500)
-                                        time.sleep(0.3)
-                                        clicked = True
-                                        break
-                        except Exception:
-                            pass
-
-                # 4. If not clicked yet, try standard Yes/True/1
-                if not clicked:
-                    for opt in options:
-                        try:
-                            if not opt.is_visible():
-                                continue
-                            txt = opt.inner_text().strip().lower()
-                            if txt in ["yes", "true", "1"]:
-                                opt.click(timeout=1500)
-                                time.sleep(0.3)
-                                clicked = True
-                                break
-                        except Exception:
-                            pass
-
-                # 3. Otherwise, fallback to the first visible option
-                if not clicked and options:
-                    for opt in options:
-                        try:
-                            if opt.is_visible():
-                                opt.click(timeout=1500)
-                                time.sleep(0.3)
-                                break
-                        except Exception:
-                            pass
+                            except Exception:
+                                pass
+                                
+                # Fallback to the first visible option if intent engine couldn't click anything
+                if not clicked and valid_opts:
+                    try:
+                        valid_opts[0].click(timeout=1500)
+                        time.sleep(0.3)
+                    except Exception:
+                        pass
             except Exception as e:
                 logger.debug(f"   [ChatbotRadio] error: {e}")
 
@@ -606,14 +597,17 @@ def _handle_quick_apply_panel(job_page, config: dict) -> bool:
     # has been submitted' or a green 'Applied' badge.
     # ----------------------------------------------------------------
     APPLIED_CONFIRMATION_SELECTORS = [
-        "div:has-text('Applied to')",
-        "span:has-text('Applied to')",
-        "div:has-text('application has been submitted')",
-        "div:has-text('successfully applied')",
-        "div[class*='applied-message']",
-        "div[class*='success-message']",
-        "div[class*='confirmation']",
-        "p:has-text('Applied')",
+        "text='applied successfully'",
+        "text='successfully applied'",
+        "text='application has been submitted'",
+        "text='application submitted'",
+        "text='Applied to '",
+        "text='Applied successfully'",
+        "div.applied-message",
+        "div.success-message",
+        "div.confirmation",
+        ".apply-message",
+        ".success-msg"
     ]
     for sel in APPLIED_CONFIRMATION_SELECTORS:
         try:
@@ -699,6 +693,14 @@ def _handle_quick_apply_panel(job_page, config: dict) -> bool:
         if submit_btn.is_visible():
             # If it's a custom chatbot sendMsg button, check if it's currently disabled.
             # If so, wait for it to become enabled (up to 3 seconds).
+            btn_html = submit_btn.evaluate("el => el.outerHTML").lower()
+            is_chatbot_arrow = "sendmsg" in btn_html
+            
+            if is_chatbot_arrow and has_text_input:
+                logger.info("   Detected 'sendMsg' arrow for a text input. Continuing chatbot loop...")
+                time.sleep(2)
+                continue
+
             try:
                 classes = submit_btn.get_attribute("class") or ""
                 if "disabled" in classes:
@@ -830,7 +832,14 @@ def apply_to_jobs(page, config: dict) -> list:
     total = len(job_cards)
     logger.info(f"Found {total} job cards.")
 
+    max_applications = config.get("max_applications", 10)
+    applied_count = 0
+
     for index, card in enumerate(job_cards):
+        if applied_count >= max_applications:
+            logger.info(f"Reached max applications limit ({max_applications}). Stopping.")
+            break
+
         job_page = None
         break_loop = False
         try:
@@ -850,6 +859,22 @@ def apply_to_jobs(page, config: dict) -> list:
             
             job_title = f"{raw_title} at {raw_comp}"
             logger.info(f"[{index + 1}/{total}] Processing: {job_title}")
+
+            # ------------------------------------------------------------------
+            # Apply Title Keywords Filter (if configured)
+            # ------------------------------------------------------------------
+            title_filter_keywords = config.get("title_filter_keywords", [])
+            if title_filter_keywords:
+                matched_title = False
+                for keyword in title_filter_keywords:
+                    if keyword.lower() in raw_title.lower():
+                        matched_title = True
+                        break
+                
+                if not matched_title:
+                    logger.info(f" -> Title mismatch (does not contain: {title_filter_keywords}) — skipping.")
+                    job_records.append({"title": job_title, "status": "Ignored", "reason": "Title mismatch"})
+                    continue
 
             card.scroll_into_view_if_needed()
             time.sleep(0.5)
@@ -932,7 +957,7 @@ def apply_to_jobs(page, config: dict) -> list:
                     pass
 
             if is_company_site_job:
-                job_records.append({"title": job_title, "status": "Ignored", "reason": "Apply on Company Site"})
+                job_records.append({"title": job_title, "status": "Ignored", "reason": "Apply on Company Site", "link": job_page.url})
                 job_page.close()
                 search_tab.bring_to_front()
                 time.sleep(1)
@@ -1002,9 +1027,10 @@ def apply_to_jobs(page, config: dict) -> list:
             if applied:
                 logger.info(" -> Done! Closing job tab.")
                 job_records.append({"title": job_title, "status": "Applied", "reason": "Success"})
+                applied_count += 1
             else:
                 logger.info(" -> External apply — closing tab.")
-                job_records.append({"title": job_title, "status": "Ignored", "reason": "External apply / Form failed"})
+                job_records.append({"title": job_title, "status": "Ignored", "reason": "External apply / Form failed", "link": job_page.url})
 
         except Exception as e:
             logger.error(f"Error on card {index + 1}: {e}")

@@ -98,44 +98,84 @@ def load_config(config_path: str) -> dict:
 # Platform runners
 # ---------------------------------------------------------------------------
 
-def run_linkedin(playwright, config: dict, logger: logging.Logger) -> None:
+def run_linkedin(playwright, config: dict, logger: logging.Logger, headless: bool = False, action: str = "run") -> None:
     """Runs the LinkedIn Easy Apply automation."""
     import linkedin_actions as actions
 
+    # Manual login is assumed from here on, credentials aren't required.
     username = config.get("linkedin_username")
     password = config.get("linkedin_password")
-    if not username or not password:
-        logger.error("linkedin_username or linkedin_password missing in config.json")
-        return
 
     logger.info("Closing existing Chrome instances...")
     os.system("taskkill /F /IM chrome.exe")
     time.sleep(1)
 
+    # Force visible browser for manual login
+    if action == "manual_login":
+        headless = False
+
+    # Mask the headless user agent
+    real_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+
     context = playwright.chromium.launch_persistent_context(
-        user_data_dir=r"C:\Users\swapn\ChromeAutomationProfile",
+        user_data_dir=os.path.join(os.getcwd(), "ChromeProfile"),
         channel="chrome",
-        headless=False,
-        ignore_default_args=["--mute-audio", "--hide-scrollbars"],
+        headless=headless,
+        user_agent=real_user_agent,
+        ignore_default_args=["--mute-audio", "--hide-scrollbars", "--enable-automation"],
         no_viewport=True,
         args=[
             "--start-maximized",
             "--profile-directory=Default",
             "--disable-extensions",
             "--disable-gpu",
+            "--disable-blink-features=AutomationControlled",
         ],
     )
 
-    page = context.pages[0]
+    # Stealth: hide webdriver
+    context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
+    # Safely get or create the first page
+    if context.pages:
+        page = context.pages[0]
+    else:
+        page = context.new_page()
+
     logger.info("Navigating to LinkedIn...")
     try:
         page.goto("https://www.linkedin.com/", wait_until="domcontentloaded", timeout=60000)
     except Exception as e:
         logger.warning(f"Timeout during navigation, continuing anyway: {e}")
 
-    if not actions.is_already_logged_in(page):
+    if action == "check_login":
+        status, user_name = actions.is_already_logged_in(page)
+        name_str = f"|{user_name}" if user_name else ""
+        print(f"LOGIN_STATUS: {'SUCCESS' if status else 'FAILED'}{name_str}")
+        context.close()
+        return
+
+    if action == "logout":
+        actions.logout(page)
+        print("LOGOUT_STATUS: SUCCESS")
+        context.close()
+        return
+
+    if action == "manual_login":
+        print("Waiting for user to log in manually...")
+        # Check every 2 seconds if feed is detected
+        status, _ = actions.is_already_logged_in(page)
+        while not status:
+            time.sleep(2)
+            status, _ = actions.is_already_logged_in(page)
+        print("LOGIN_STATUS: SUCCESS")
+        context.close()
+        return
+
+    status, _ = actions.is_already_logged_in(page)
+    if not status:
         actions.login(page, username, password)
-    actions.search_jobs(page)
+    actions.search_jobs(page, config)
     job_records = actions.apply_to_jobs(page, config)
 
     logger.info("Generating PDF report...")
@@ -143,38 +183,76 @@ def run_linkedin(playwright, config: dict, logger: logging.Logger) -> None:
     report_path = generate_pdf_report("linkedin", job_records)
     logger.info(f"Execution report saved to: {report_path}")
 
+    # Save to database
+    import database
+    applied = sum(1 for j in job_records if j.get("status") == "Applied")
+    ignored = sum(1 for j in job_records if j.get("status") == "Ignored")
+    failed = sum(1 for j in job_records if j.get("status") == "Failed")
+    db_status = "Completed" if not failed else "Completed with Errors"
+    
+    # Check if Email Alerts are enabled
+    email_status = "Not Configured/Disabled"
+    if config.get("email_alerts") is True:
+        import emailer
+        logger.info("Email Alerts enabled. Sending report...")
+        subject = f"LinkedIn Job Application Run: {db_status}"
+        body = f"""
+        <h2>LinkedIn Automation Run Completed</h2>
+        <p><strong>Status:</strong> {db_status}</p>
+        <ul>
+            <li><strong>Applied:</strong> {applied}</li>
+            <li><strong>Ignored:</strong> {ignored}</li>
+            <li><strong>Failed:</strong> {failed}</li>
+        </ul>
+        <p>Please find the detailed PDF report attached.</p>
+        """
+        success = emailer.send_email(subject, body, report_path)
+        email_status = "Sent" if success else "Failed"
+
+    database.save_run("linkedin", db_status, applied, ignored, failed, report_path, email_status)
+
     logger.info("LinkedIn automation finished.")
     context.close()
 
 
-def run_naukri(playwright, config: dict, logger: logging.Logger) -> None:
+def run_naukri(playwright, config: dict, logger: logging.Logger, headless: bool = False, action: str = "run") -> None:
     """Runs the Naukri job apply automation."""
     import naukri_actions as actions
 
+    # Manual login is assumed from here on, credentials aren't required.
     username = config.get("naukri_username")
     password = config.get("naukri_password")
-    if not username or not password:
-        logger.error("naukri_username or naukri_password missing in naukri_config.json")
-        return
 
     logger.info("Closing existing Chrome instances...")
     os.system("taskkill /F /IM chrome.exe")
     # Wait longer than LinkedIn — Naukri's persistent profile lock can take a moment to release
     time.sleep(3)
 
+    # Force visible browser for manual login
+    if action == "manual_login":
+        headless = False
+
+    # Mask the headless user agent
+    real_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+
     context = playwright.chromium.launch_persistent_context(
-        user_data_dir=r"C:\Users\swapn\ChromeAutomationProfile",
+        user_data_dir=os.path.join(os.getcwd(), "ChromeProfile"),
         channel="chrome",
-        headless=False,
-        ignore_default_args=["--mute-audio", "--hide-scrollbars"],
+        headless=headless,
+        user_agent=real_user_agent,
+        ignore_default_args=["--mute-audio", "--hide-scrollbars", "--enable-automation"],
         no_viewport=True,
         args=[
             "--start-maximized",
             "--profile-directory=Default",
             "--disable-extensions",
             "--disable-gpu",
+            "--disable-blink-features=AutomationControlled",
         ],
     )
+
+    # Stealth: hide webdriver
+    context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
     # Safely get or create the first page
     if context.pages:
@@ -188,7 +266,31 @@ def run_naukri(playwright, config: dict, logger: logging.Logger) -> None:
     except Exception as e:
         logger.warning(f"Timeout during navigation, continuing anyway: {e}")
 
-    if not actions.is_already_logged_in(page):
+    if action == "check_login":
+        status, user_name = actions.is_already_logged_in(page)
+        name_str = f"|{user_name}" if user_name else ""
+        print(f"LOGIN_STATUS: {'SUCCESS' if status else 'FAILED'}{name_str}")
+        context.close()
+        return
+
+    if action == "logout":
+        actions.logout(page)
+        print("LOGOUT_STATUS: SUCCESS")
+        context.close()
+        return
+
+    if action == "manual_login":
+        print("Waiting for user to log in manually...")
+        status, _ = actions.is_already_logged_in(page)
+        while not status:
+            time.sleep(2)
+            status, _ = actions.is_already_logged_in(page)
+        print("LOGIN_STATUS: SUCCESS")
+        context.close()
+        return
+
+    status, _ = actions.is_already_logged_in(page)
+    if not status:
         actions.login(page, username, password)
     actions.search_jobs(page, config)
     job_records = actions.apply_to_jobs(page, config)
@@ -197,6 +299,34 @@ def run_naukri(playwright, config: dict, logger: logging.Logger) -> None:
     from report_generator import generate_pdf_report
     report_path = generate_pdf_report("naukri", job_records)
     logger.info(f"Execution report saved to: {report_path}")
+
+    # Save to database
+    import database
+    applied = sum(1 for j in job_records if j.get("status") == "Applied")
+    ignored = sum(1 for j in job_records if j.get("status") == "Ignored")
+    failed = sum(1 for j in job_records if j.get("status") == "Failed")
+    db_status = "Completed" if not failed else "Completed with Errors"
+    
+    # Check if Email Alerts are enabled
+    email_status = "Not Configured/Disabled"
+    if config.get("email_alerts") is True:
+        import emailer
+        logger.info("Email Alerts enabled. Sending report...")
+        subject = f"Naukri Job Application Run: {db_status}"
+        body = f"""
+        <h2>Naukri Automation Run Completed</h2>
+        <p><strong>Status:</strong> {db_status}</p>
+        <ul>
+            <li><strong>Applied:</strong> {applied}</li>
+            <li><strong>Ignored:</strong> {ignored}</li>
+            <li><strong>Failed:</strong> {failed}</li>
+        </ul>
+        <p>Please find the detailed PDF report attached.</p>
+        """
+        success = emailer.send_email(subject, body, report_path)
+        email_status = "Sent" if success else "Failed"
+        
+    database.save_run("naukri", db_status, applied, ignored, failed, report_path, email_status)
 
     logger.info("Naukri automation finished.")
     context.close()
@@ -231,6 +361,17 @@ def main():
             "Defaults: config.json (linkedin), naukri_config.json (naukri)"
         ),
     )
+    parser.add_argument(
+        "--action",
+        default="run",
+        choices=["run", "check_login", "manual_login", "logout"],
+        help="Action to perform. Default is 'run'.",
+    )
+    parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="Run browser in headless mode",
+    )
     args = parser.parse_args()
 
     platform = args.platform
@@ -254,9 +395,9 @@ def main():
 
     with sync_playwright() as playwright:
         if platform == "linkedin":
-            run_linkedin(playwright, config, logger)
+            run_linkedin(playwright, config, logger, args.headless, args.action)
         elif platform == "naukri":
-            run_naukri(playwright, config, logger)
+            run_naukri(playwright, config, logger, args.headless, args.action)
 
 
 if __name__ == "__main__":

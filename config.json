@@ -1,14 +1,10 @@
 {
-    "linkedin_username": "swapnildhamal7895@gmail.com",
-    "linkedin_password": "Swapnil@7895",
-    "total_exp": "5",
-    "linkedin_url": "https://www.linkedin.com/in/swapnil-dhamal-33b5b2220/",
-    "mobile": "8208331243",
-    "notice_period": "30",
-    "ctc": "16.2",
-    "ctc_full": "1620000",
-    "expected_ctc": "23",
-    "expected_ctc_full": "2300000",
+    "max_applications": 10,
+    "date_posted": "Past week",
+    "easy_apply": true,
+    "remote_only": true,
     "location": "Pune",
-    "max_log_files": 5
+    "job_keywords": [
+        "java"
+    ]
 }
