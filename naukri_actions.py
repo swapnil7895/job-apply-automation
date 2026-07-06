@@ -238,6 +238,23 @@ def search_jobs(page, config: dict) -> None:
     if remote_only:
         _click_filter(page, ["label:has-text('Remote')", "span:has-text('Remote')"], "Remote Only")
 
+    # 5. Location Filter (Left sidebar)
+    if location:
+        _click_filter(page, [
+            f"label[for^='chk-{location}-cityTypeGid']",
+            f"span[title='{location}']",
+            f"label:has-text('{location}')"
+        ], f"Location '{location}' filter")
+
+    # 6. Salary Filter
+    salary_range = config.get("salary_range", "")
+    if salary_range:
+        _click_filter(page, [
+            f"label[for^='chk-{salary_range}-ctcFilter']",
+            f"span[title='{salary_range}']",
+            f"label:has-text('{salary_range}')"
+        ], f"Salary '{salary_range}' filter")
+
     time.sleep(2)  # Let results refresh after filters
     logger.info(f"Filters applied. Final page: {page.url}")
 

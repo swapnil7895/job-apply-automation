@@ -1,6 +1,45 @@
+import os
 import re
 import datetime
+import logging
 from difflib import SequenceMatcher
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+logger = logging.getLogger(__name__)
+
+def ask_gemini(question: str, options: list, profile: dict) -> str:
+    """Uses Gemini to intelligently answer an unknown question using profile data."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY not found in environment.")
+        
+    from google import genai
+    client = genai.Client(api_key=api_key)
+    
+    prompt = f"You are a job application assistant. Answer this job application question based on the user's profile.\n\n"
+    prompt += f"Question: {question}\n\n"
+    if options:
+        prompt += f"Available Options to choose from (pick exactly one that fits best): {', '.join(options)}\n\n"
+    
+    prompt += f"User Profile Details: \n"
+    for k, v in profile.items():
+        if v:
+            prompt += f"- {k}: {v}\n"
+            
+    prompt += "\nOutput ONLY the final answer (a short phrase or exact option match). Do not explain."
+    
+    response = client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=prompt
+    )
+    if not response.text:
+        raise ValueError("Gemini returned empty response.")
+    return response.text.strip()
 
 def normalize_text(text: str) -> str:
     """Lowercases, strips punctuation, and removes extra spaces."""
@@ -82,6 +121,9 @@ def resolve_intent(question_text: str, field_type: str = "text", options: list =
         "gender": ["gender", "sex"],
         "disability": ["disability"],
         "country": ["country of work authorization", "country of residence"],
+        "title": ["your title", "job title", "designation"],
+        "company": ["company", "employer name", "organization name"],
+        "description": ["description", "summary", "responsibilities", "profile summary"],
     }
     
     detected_intent = "unknown"
@@ -143,18 +185,36 @@ def resolve_intent(question_text: str, field_type: str = "text", options: list =
     elif detected_intent == "current_employer":
         response = {"type": "static", "answer": "Vigoursoft"}
 
+    elif detected_intent == "title":
+        response = {"type": "profile", "field": "title", "answer": str(profile.get("title", "Software Engineer"))}
+        
+    elif detected_intent == "company":
+        response = {"type": "profile", "field": "company", "answer": str(profile.get("company", "Vigoursoft"))}
+        
+    elif detected_intent == "description":
+        response = {"type": "profile", "field": "description", "answer": "Experienced software engineer with a strong background in developing scalable applications."}
+
     # 3. Resolve Dynamic handlers
     elif detected_intent in ["applied_before", "interviewed_before", "previous_employer", "reason_leaving", "resume_cover"]:
         response = {"type": "dynamic", "handler": detected_intent, "answer": "No"} # Default answer for dynamic if not handled
         
     # 4. Fallback raw logic
     else:
-        if any(kw in q_norm for kw in ["exp", "year", "how much", "how many"]):
-            response = {"type": "profile", "field": "experience", "answer": str(profile.get("total_exp", profile.get("experience", "5")))}
-        elif any(kw in q_norm for kw in ["do you", "have you", "are you", "willing", "available", "ready", "do u", "have u", "experience in"]):
-            response = {"type": "static", "answer": "Yes"}
-        else:
-            response = {"type": "unknown", "answer": "Yes"}
+        # Attempt intelligent fallback with Gemini API first
+        try:
+            gemini_ans = ask_gemini(question_text, options, profile)
+            if gemini_ans:
+                response = {"type": "gemini", "answer": gemini_ans}
+        except Exception as e:
+            logger.warning(f"Gemini fallback failed ({e}), using default static rules.")
+            
+            # Absolute failsafe (default logic)
+            if any(kw in q_norm for kw in ["exp", "year", "how much", "how many"]):
+                response = {"type": "profile", "field": "experience", "answer": str(profile.get("total_exp", profile.get("experience", "5")))}
+            elif any(kw in q_norm for kw in ["do you", "have you", "are you", "willing", "available", "ready", "do u", "have u", "experience in"]):
+                response = {"type": "static", "answer": "Yes"}
+            else:
+                response = {"type": "unknown", "answer": "Yes"}
 
     # 5. Format output based on field type and options
     if field_type in ["select", "radio", "checkbox", "options"] and options and response.get("answer"):

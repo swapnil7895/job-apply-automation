@@ -3,8 +3,15 @@
     "date_posted": "Past week",
     "easy_apply": true,
     "remote_only": true,
+    "email_alerts": true,
     "location": "Pune",
+    "title_filter_keywords": [
+        "python",
+        "ai",
+        "sdet"
+    ],
+    "skills_profile": {},
     "job_keywords": [
-        "java"
+        "python"
     ]
 }

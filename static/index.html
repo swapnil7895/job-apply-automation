@@ -189,6 +189,20 @@
                             <input type="text" name="location" id="naukri_location">
                         </div>
                         <div class="form-group full-width">
+                            <label>Salary Range</label>
+                            <select name="salary_range" id="naukri_salary_range">
+                                <option value="">Any</option>
+                                <option value="0-3 Lakhs">0-3 Lakhs</option>
+                                <option value="3-6 Lakhs">3-6 Lakhs</option>
+                                <option value="6-10 Lakhs">6-10 Lakhs</option>
+                                <option value="10-15 Lakhs">10-15 Lakhs</option>
+                                <option value="15-25 Lakhs">15-25 Lakhs</option>
+                                <option value="25-50 Lakhs">25-50 Lakhs</option>
+                                <option value="50-75 Lakhs">50-75 Lakhs</option>
+                                <option value="75-100 Lakhs">75-100 Lakhs</option>
+                            </select>
+                        </div>
+                        <div class="form-group full-width">
                             <label>Title Keywords Filter (comma separated)</label>
                             <input type="text" name="title_filter_keywords" id="naukri_title_filter" placeholder="e.g. python, backend. Leave blank to disable">
                         </div>
@@ -350,7 +364,7 @@
                         </div>
                         <div class="form-group full-width">
                             <label>Receiver Email (Optional)</label>
-                            <input type="email" id="email_receiver_email" placeholder="Defaults to Sender Email if blank">
+                            <input type="email" id="email_receiver_email" multiple placeholder="Defaults to Sender Email if blank">
                         </div>
                         <div class="form-actions" style="margin-top:20px; justify-content: space-between;">
                             <button type="button" id="btn-test-email" class="btn btn-secondary">Send Test Email</button>

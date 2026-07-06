@@ -227,6 +227,11 @@ document.addEventListener("DOMContentLoaded", () => {
         
         form.elements[`${platform}_location`].value = config.location || '';
         
+        const salaryRangeSelect = form.elements[`${platform}_salary_range`];
+        if (salaryRangeSelect) {
+            salaryRangeSelect.value = config.salary_range || '';
+        }
+        
         const titleKeywords = config.title_filter_keywords || [];
         form.elements[`${platform}_title_filter`].value = Array.isArray(titleKeywords) ? titleKeywords.join(', ') : titleKeywords;
         
@@ -282,6 +287,7 @@ document.addEventListener("DOMContentLoaded", () => {
             remote_only: document.getElementById(`${platform}_remote_only`) ? document.getElementById(`${platform}_remote_only`).checked : false,
             email_alerts: document.getElementById(`${platform}_email_alerts`) ? document.getElementById(`${platform}_email_alerts`).checked : false,
             location: form.elements[`${platform}_location`].value,
+            salary_range: form.elements[`${platform}_salary_range`] ? form.elements[`${platform}_salary_range`].value : '',
             title_filter_keywords: titleFilterKeywords,
             skills_profile: skillsProfileObj
         };

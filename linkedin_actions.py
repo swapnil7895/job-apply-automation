@@ -147,9 +147,20 @@ def search_jobs(page, config: dict) -> None:
     # 'Easy Apply' filter
     if config.get("easy_apply", True):
         try:
-            try: page.get_by_role("radio", name="Filter by Easy Apply").click(timeout=3000)
-            except: page.locator("button:has-text('Easy Apply')").first.click(timeout=5000)
-            time.sleep(2)
+            direct_clicked = False
+            try:
+                tag = page.locator("label:has-text('Easy Apply'), button[aria-checked]:has-text('Easy Apply'), button[aria-pressed]:has-text('Easy Apply')").filter(visible=True).first
+                if tag.is_visible(timeout=3000):
+                    tag.click(timeout=3000)
+                    time.sleep(3)
+                    direct_clicked = True
+            except:
+                pass
+            
+            if not direct_clicked:
+                try: page.get_by_role("radio", name="Filter by Easy Apply").click(timeout=3000)
+                except: page.locator("button:has-text('Easy Apply')").first.click(timeout=5000)
+                time.sleep(2)
         except Exception as e:
             logger.warning(f"Easy Apply filter error (ignoring): {e}")
             
@@ -289,12 +300,13 @@ def fill_dynamic_fields(page, config) -> None:
                             el.fill(config.get("total_exp", "5"), timeout=2000)
                             
                         # Special handling for autocomplete location drop downs if location intent was resolved
-                        if answer == config.get("location", "Pune") and any(kw in combined for kw in ["location", "city"]):
-                            time.sleep(1.5)
+                        if answer == config.get("location", "Pune") and any(kw in combined for kw in ["location", "city", "reside"]):
+                            time.sleep(2)
                             el.press("ArrowDown")
-                            time.sleep(0.5)
+                            time.sleep(1)
                             el.press("Enter")
-                            time.sleep(0.5)
+                            time.sleep(1)
+                            
         except Exception as e:
             logger.debug(f"Input fill error: {e}")
 
@@ -449,7 +461,31 @@ def apply_to_jobs(page, config) -> list:
 
                 logger.info(" -> Processing form steps...")
                 max_steps = 10
+                last_progress_val = 0
+                stuck_counter = 0
                 for step_num in range(max_steps):
+                    # Check progress to prevent infinite loops on the same step due to validation errors
+                    try:
+                        progress_el = page.locator("progress").first
+                        if progress_el.is_visible(timeout=500):
+                            current_progress = float(progress_el.get_attribute("value") or 0)
+                            if current_progress == last_progress_val:
+                                stuck_counter += 1
+                                if stuck_counter > 2:
+                                    logger.warning(" -> Form progress stuck (likely validation error). Aborting this application.")
+                                    job_records.append({"title": job_title, "status": "Failed", "reason": "Form validation error"})
+                                    try:
+                                        page.locator("button[aria-label='Dismiss']").first.click(timeout=1000)
+                                        time.sleep(1)
+                                        page.locator("button:has-text('Discard')").first.click(timeout=1000)
+                                    except: pass
+                                    break
+                            else:
+                                stuck_counter = 0
+                            last_progress_val = current_progress
+                    except Exception:
+                        pass
+                        
                     # Fill dynamic fields on the current step
                     fill_dynamic_fields(page, config)
 
@@ -476,21 +512,46 @@ def apply_to_jobs(page, config) -> list:
                         time.sleep(3) # Wait a moment for submission to process
                         # Handle the small success popup cross sign (Dismiss) or Done button
                         try:
-                            # Sometimes the dismiss button takes a moment to appear
-                            dismiss_btn = page.locator("button[aria-label='Dismiss']").last
-                            if dismiss_btn.is_visible(timeout=3000):
-                                logger.info(" -> Closing post-submission popup (Dismiss)...")
-                                dismiss_btn.click(timeout=2000)
-                                time.sleep(1)
-                            else:
-                                # Fallback to looking for a 'Done' button if Dismiss is not found
-                                done_btn = page.get_by_role("button", name="Done").last
-                                if done_btn.is_visible(timeout=2000):
-                                    logger.info(" -> Closing post-submission popup (Done)...")
-                                    done_btn.click(timeout=2000)
+                            closed = False
+                            # 1. Try 'Done' buttons first as they are the primary action
+                            done_locators = [
+                                page.get_by_role("button", name="Done"),
+                                page.locator("button:has-text('Done')"),
+                                page.locator("button:has-text('Return to jobs')")
+                            ]
+                            for loc in done_locators:
+                                if loc.last.is_visible(timeout=1500):
+                                    loc.last.click(timeout=2000)
+                                    logger.info(" -> Closed post-submission popup (Done/Return).")
+                                    closed = True
                                     time.sleep(1)
+                                    break
+                                    
+                            # 2. Try 'Dismiss' X buttons if Done wasn't found
+                            if not closed:
+                                dismiss_locators = [
+                                    page.locator("button[aria-label='Dismiss']"),
+                                    page.locator("button[data-test-modal-close-btn]")
+                                ]
+                                for loc in dismiss_locators:
+                                    if loc.last.is_visible(timeout=1000):
+                                        loc.last.click(timeout=2000)
+                                        logger.info(" -> Closed post-submission popup (Dismiss).")
+                                        closed = True
+                                        time.sleep(1)
+                                        break
+                                        
+                            # 3. Absolute fallback: press Escape to clear any remaining modal
+                            if not closed:
+                                logger.info(" -> Using Escape key fallback to clear modal.")
+                                page.keyboard.press("Escape")
+                                time.sleep(1)
+                                
                         except Exception as e:
                             logger.warning(f" -> Could not close post-submission popup: {e}")
+                            page.keyboard.press("Escape")
+                            time.sleep(1)
+                            
                         job_records.append({"title": job_title, "status": "Applied", "reason": "Success"})
                         applied_count += 1
                         break

@@ -175,8 +175,13 @@ def run_linkedin(playwright, config: dict, logger: logging.Logger, headless: boo
     status, _ = actions.is_already_logged_in(page)
     if not status:
         actions.login(page, username, password)
-    actions.search_jobs(page, config)
-    job_records = actions.apply_to_jobs(page, config)
+        
+    job_records = []
+    try:
+        actions.search_jobs(page, config)
+        job_records = actions.apply_to_jobs(page, config)
+    except Exception as e:
+        logger.error(f"Critical execution error during LinkedIn processing: {e}")
 
     logger.info("Generating PDF report...")
     from report_generator import generate_pdf_report
@@ -292,8 +297,13 @@ def run_naukri(playwright, config: dict, logger: logging.Logger, headless: bool 
     status, _ = actions.is_already_logged_in(page)
     if not status:
         actions.login(page, username, password)
-    actions.search_jobs(page, config)
-    job_records = actions.apply_to_jobs(page, config)
+        
+    job_records = []
+    try:
+        actions.search_jobs(page, config)
+        job_records = actions.apply_to_jobs(page, config)
+    except Exception as e:
+        logger.error(f"Critical execution error during Naukri processing: {e}")
 
     logger.info("Generating PDF report...")
     from report_generator import generate_pdf_report

@@ -5,7 +5,9 @@ AutoApply Pro is a fully automated, headless job application bot for **LinkedIn*
 ## ✨ Features
 - **Multi-Platform**: Supports applying to jobs on LinkedIn (Easy Apply) and Naukri.
 - **Smart Answers**: Uses Gemini AI (Intent Engine) to intelligently answer custom employer questions based on your skills profile.
+- **Advanced Filtering**: Fine-tune your searches with granular filters like Location, Salary Range (Naukri), and Remote-only preferences.
 - **Background Scheduling**: Set it up to run in the background (headless) daily at a specific time.
+- **Email Alerts**: Receive automated email notifications with your PDF reports upon completion.
 - **PDF Reporting**: Generates beautiful PDF reports of all the jobs you successfully applied to.
 - **Persistent Sessions**: Log in once, and the app will remember your session for future runs.
 - **Local Web Dashboard**: A sleek, dark-mode GUI to manage your automation.
